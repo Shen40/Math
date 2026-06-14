@@ -6,8 +6,8 @@ from scipy.special import j1
 
 # --- Parameters ---
 #try decrease the length and time for better graph
-L = 2000
-T = 1000
+L = 200
+T = 300
 nx = 4001 #bigger        
 dx = 2 * L / (nx - 1) 
 dt = 0.5 * dx  
@@ -19,7 +19,7 @@ a = 2
 m = 1.0               
 sigma_src = 1   
 
-v0_amp = 5
+v0_amp = 1
 v0_sigma = 2
 v0_center = 10.0      
 
@@ -58,14 +58,8 @@ def calculate_force(n, x0, V_field, U_field):
     dV_dx = np.gradient(V_field, dx)
     dV_dx_z = np.interp(z1_x0, x, dV_dx) 
     
-    # Check for near-lightspeed safety 
-    # it picked up the physic context :( 
-    gamma_inv_sq = np.clip(1.0 - zd_x0**2, 1e-15, None) 
-    
-    # Damping proportional to \dot{z}/(1-\dot{z}^2)
-    damping = (0.5 * a**2) * (zd_x0 / gamma_inv_sq)
     #massless force
-    f0 = a * dV_dx_z - damping 
+    f0 = 0.5 * a**2 * zd_x0 
     
     # 2. History/Tail integral I1^2
     if n == 0:
@@ -95,7 +89,7 @@ def calculate_force(n, x0, V_field, U_field):
     # 4. Total Force Assembly
     gamma_inv_x0 = np.sqrt(np.maximum(0.0, 1.0 - zd_x0**2))
     # f = f0 + (I1_2 + \partial_1 V + \partial_1 U)(a * sqrt(1 - \dot{z}^2))
-    f_total = f0 + (I1_2 + dV_dx_z + dU_dx_z) * (a * gamma_inv_x0)
+    f_total = -f0 + (I1_2 + dV_dx_z + dU_dx_z) * (a * gamma_inv_x0)
     
     return f_total
 
@@ -188,6 +182,7 @@ print("Simulation complete.")
 
 # --- Static Plots ---
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+fig, (ax1) = plt.subplots(1, figsize=(12, 5))
 
 # Plot the particle's dynamic trajectory comparison
 ax1.plot(z_arr, t_arr, color='green', lw=2, label='Dynamic Trajectory')
@@ -205,22 +200,24 @@ ax2.set_title('Calculated Force on Particle')
 ax2.grid(True, linestyle='--', alpha=0.7)
 
 plt.tight_layout()
+plt.savefig('1particle_trajectory.png', dpi=300)
 plt.show()
+
 
 # --- NEW: Animation Block ---
 fig_ani, ax_ani = plt.subplots(figsize=(10, 6))
 # Set appropriate limits for the scalar field u
-ax_ani.set_xlim(-L, L)
-ax_ani.set_ylim(-1.0, 2.5) # Based on U_static (a/2) + V_Gaussian (v0_amp)
+ax_ani.set_xlim(-50, 50)
+ax_ani.set_ylim(-2.5, 2.5) # Based on U_static (a/2) + V_Gaussian (v0_amp)
 ax_ani.set_xlabel('$x^1$')
 ax_ani.set_ylabel('$u(x^0, x^1)$')
-ax_ani.set_title('1D Klein-Gordon with Dynamic Source (Loop Sequence Optimized)')
+ax_ani.set_title('1D Klein-Gordon with Incoming Radiation')
 ax_ani.grid(True, linestyle='--', alpha=0.6)
 
 # Line object for the scalar field
 line, = ax_ani.plot([], [], lw=2, color='royalblue', label='Total Scalar Field $u$')
 # Marker object for the dynamic particle position z(t)
-source_marker, = ax_ani.plot([], [], 'ro', markersize=6, label='Dynamic Particle $z(x^0)$')
+source_marker, = ax_ani.plot([], [], 'ro', markersize=6, label='Particle $z(x^0)$')
 # Text object for the timestamp
 time_text = ax_ani.text(0.02, 0.95, '', transform=ax_ani.transAxes, fontsize=12)
 ax_ani.legend(loc='upper right')
@@ -253,8 +250,87 @@ def animate(i):
     time_text.set_text(f'Time: {t_current:.2f}')
     return line, source_marker, time_text
 
+# ... (your existing animation setup code)
+
 # Create the animation object
-# Interval 30ms -> ~33 FPS
-ani = FuncAnimation(fig_ani, animate, frames=len(history_u), init_func=init, blit=True, interval=30)
+ani = FuncAnimation(fig_ani, animate, frames=len(history_u), 
+                    init_func=init, blit=True, interval=120)
+
+# Show animation
 plt.tight_layout()
 plt.show()
+# --- SAVE AS GIF ---
+# print("Saving animation to GIF... this may take a moment.")
+# ani.save('klein_gordon_simulation_SLOW.gif', writer='pillow', fps=120, dpi=100)
+# print("Save complete!")
+
+
+# # --- Save Specific Snapshots ---
+
+# # 1. Snapshot at t = 0
+# idx_t0 = 0
+# t0_actual = times_anim[idx_t0]
+
+# plt.figure(figsize=(10, 5))
+# plt.xlim(-50, 50)  
+# plt.ylim(-2.5, 2.5)  
+# plt.plot(x, history_u[idx_t0], label='Field $u(x)$', color='blue')
+# idx_z0 = np.argmin(np.abs(x - z_arr[0]))
+# plt.scatter(z_arr[0], history_u[idx_t0][idx_z0], color='red', zorder=5, label='Charge')
+# plt.title(f'Scalar Field Snapshot at $t = {t0_actual:.2f}$')
+# plt.xlabel('Position ($x$)')
+# plt.ylabel('Field Amplitude ($u$)')
+# plt.grid(True, linestyle='--', alpha=0.7)
+# plt.legend()
+# plt.savefig('snapshot_t_0.png', dpi=300)
+# plt.close()
+# print("Saved snapshot_t_0.png")
+
+
+# # 2. Snapshot when the radiation hits the charge (the "kick" moment)
+# search_start_idx = int(len(forces) * 0.1) 
+# idx_kick = search_start_idx + np.argmax(np.abs(forces[search_start_idx:]))
+# t_kick = t_arr[idx_kick]
+
+# idx_anim_kick = np.argmin(np.abs(times_anim - t_kick))
+# t_kick_actual = times_anim[idx_anim_kick]
+
+# plt.figure(figsize=(10, 5))
+# plt.xlim(-50, 50)  
+# plt.ylim(-2.5, 2.5)  
+# plt.plot(x, history_u[idx_anim_kick], label='Field $u(x)$', color='blue')
+# z_kick = z_arr[idx_kick]
+# idx_z_kick = np.argmin(np.abs(x - z_kick))
+# plt.scatter(z_kick, history_u[idx_anim_kick][idx_z_kick], color='red', zorder=5, label='Charge')
+# plt.title(f'Scalar Field Snapshot at Radiation Impact ($t = {t_kick_actual:.2f}$)')
+# plt.xlabel('Position ($x$)')
+# plt.ylabel('Field Amplitude ($u$)')
+# plt.grid(True, linestyle='--', alpha=0.7)
+# plt.legend()
+# plt.savefig('snapshot_radiation_impact.png', dpi=300)
+# plt.close()
+# print(f"Saved snapshot_radiation_impact.png (Detected impact at t = {t_kick:.2f})")
+
+
+# # 3. Snapshot at the absolute end of the simulation
+# idx_end = -1  # Last element in the history
+# t_end_actual = times_anim[idx_end]
+
+# plt.figure(figsize=(10, 5))
+# plt.xlim(-50, 50)  
+# plt.ylim(-2.5, 2.5)  
+# plt.plot(x, history_u[idx_end], label='Field $u(x)$', color='blue')
+
+# # Find closest x index for the source position at the final time step
+# z_end = z_arr[-1]
+# idx_z_end = np.argmin(np.abs(x - z_end))
+# plt.scatter(z_end, history_u[idx_end][idx_z_end], color='red', zorder=5, label='Charge')
+
+# plt.title(f'Scalar Field Snapshot at End of Simulation ($t = {t_end_actual:.2f}$)')
+# plt.xlabel('Position ($x$)')
+# plt.ylabel('Field Amplitude ($u$)')
+# plt.grid(True, linestyle='--', alpha=0.7)
+# plt.legend()
+# plt.savefig('snapshot_end_of_simulation.png', dpi=300)
+# plt.close()
+# print(f"Saved snapshot_end_of_simulation.png (Captured final state at t = {t_end_actual:.2f})")

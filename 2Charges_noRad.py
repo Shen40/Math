@@ -3,11 +3,8 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation 
 from scipy.special import j1
 
-#total force vs distance between charges 
-#log scale 
 # --- Parameters ---
-# Decreased length and time to visualize the interaction clearly and quickly
-L = 200
+L = 40
 T = 20
 nx = 4001      
 dx = 2 * L / (nx - 1) 
@@ -15,8 +12,8 @@ dt = 0.5 * dx
 nt = int(T / dt)
 C2 = (dt / dx)**2
 
-mu = 0.01
-a1 = 2
+mu = 1
+a1 = 4
 a2 = 2
 m = 1.0               
 sigma_src = 0.2   
@@ -25,13 +22,11 @@ x = np.linspace(-L, L, nx)
 t_arr = np.linspace(0, T, nt)
 
 # Setting up dynamic Arrays 
-# Particle 1
 z1_arr = np.zeros(nt)  
 zd1_arr = np.zeros(nt) 
 p1_arr = np.zeros(nt)  
 forces1 = np.zeros(nt) 
 
-# Particle 2
 z2_arr = np.zeros(nt)  
 zd2_arr = np.zeros(nt) 
 p2_arr = np.zeros(nt)  
@@ -56,12 +51,8 @@ def source(x_val, z_val, zd_val, a):
 
 # --- Force Calculation ---
 def calculate_force(n, t_current, z_cur, zd_cur, z_hist, zd_hist, u_field, a):
-    # 1. calculate f_0 
-    # No radiation here so no V terms
-    gamma_inv_sq = np.clip(1.0 - zd_cur**2, 1e-15, None) 
-    f_0 = -(0.5 * a**2) * (zd_cur / gamma_inv_sq)
+    f_0 = -(0.5 * a**2) * (zd_cur)
     
-    # 2. History/Tail integral I1^2
     if n == 0:
         I1_2 = 0.0
     else:
@@ -77,11 +68,9 @@ def calculate_force(n, t_current, z_cur, zd_cur, z_hist, zd_hist, u_field, a):
         
         I1_2 = (a * (mu**2) / 2.0) * np.trapezoid(integrand, t_past)
 
-    # 3. Total Field Gradient (Self-gradient is ~0 due to symmetric smearing)
     du_dx = np.gradient(u_field, dx)
-    du_dx_z = np.interp(z_cur, x, du_dx)
+    du_dx_z = np.interp(z_cur, x, du_dx) 
     
-    # 4. Total Force Assembly
     gamma_inv = np.sqrt(np.maximum(0.0, 1.0 - zd_cur**2))
     f_total = f_0 + (I1_2 + du_dx_z) * (a * gamma_inv)
     
@@ -90,13 +79,11 @@ def calculate_force(n, t_current, z_cur, zd_cur, z_hist, zd_hist, u_field, a):
 # --- Field Initialization ---
 u_prev, u_curr, u_next = np.zeros(nx), np.zeros(nx), np.zeros(nx)
 
-# Initial Static Field data 
 U0_1 = (a1 / (2 * mu)) * np.exp(-mu * np.abs(x - z1_arr[0])) 
 U0_2 = (a2 / (2 * mu)) * np.exp(-mu * np.abs(x - z2_arr[0])) 
 
 u_curr[:] = U0_1[:] + U0_2[:]
 
-# Prepare histories for plotting/animation
 frame_step = max(1, nt // 200) 
 history_u = [u_curr.copy()]
 times_anim = [0.0]
@@ -105,86 +92,94 @@ times_anim = [0.0]
 print("Simulating... Started from defined trajectories, updating dynamically.")
 for n in range(nt - 1): 
     
-    # 1. Start with current Z and combine sources
     S1 = source(x, z1_arr[n], zd1_arr[n], a1)
     S2 = source(x, z2_arr[n], zd2_arr[n], a2)
     S_total = S1 + S2
     
-    # 2. Calculate field (u_next) based on combined sources
     if n == 0:
         u_next[1:-1] = (u_curr[1:-1] + 
                         0.5 * C2 * (u_curr[2:] - 2*u_curr[1:-1] + u_curr[:-2]) -
                         0.5 * (dt**2) * (mu**2) * u_curr[1:-1] +
                         0.5 * (dt**2) * S_total[1:-1])
     else:
-        # Standard Finite Difference steps
         u_next[1:-1] = (2 * u_curr[1:-1] - u_prev[1:-1] +
                         C2 * (u_curr[2:] - 2*u_curr[1:-1] + u_curr[:-2]) -
                         (dt**2) * (mu**2) * u_curr[1:-1] +
                         (dt**2) * S_total[1:-1])
         
-    # Boundary Conditions 
     u_next[0] = 0; u_next[-1] = 0
 
-    # 3. Calculate Force for both particles independently
     forces1[n] = calculate_force(n, t_arr[n+1], z1_arr[n], zd1_arr[n], z1_arr, zd1_arr, u_next, a1)
     forces2[n] = calculate_force(n, t_arr[n+1], z2_arr[n], zd2_arr[n], z2_arr, zd2_arr, u_next, a2)
 
-    # 4. Dynamically update Z for the next step (n+1)
-    # Particle 1
+    # Dynamically update Z for the next step (n+1)
     p1_arr[n+1] = p1_arr[n] + dt * forces1[n]
     p_over_m1 = p1_arr[n+1] / m
     zd1_arr[n+1] = p_over_m1 / np.sqrt(np.maximum(0.0, 1.0 + p_over_m1**2))
     z1_arr[n+1] = z1_arr[n] + dt * zd1_arr[n+1]
     
-    # Particle 2
     p2_arr[n+1] = p2_arr[n] + dt * forces2[n]
     p_over_m2 = p2_arr[n+1] / m
     zd2_arr[n+1] = p_over_m2 / np.sqrt(np.maximum(0.0, 1.0 + p_over_m2**2))
     z2_arr[n+1] = z2_arr[n] + dt * zd2_arr[n+1]
 
-    # 5. Repeat: Rotate fields
+    # --- NEW: Early Stop Condition (Before Crossing Paths) ---
+    if z1_arr[n+1] >= z2_arr[n+1]:
+        print(f"\n[Early Stop] Particles are about to cross paths at t = {t_arr[n+1]:.2f}.")
+        u_prev[:], u_curr[:] = u_curr[:], u_next[:]  # Keep field state aligned
+        
+        if times_anim[-1] != t_arr[n+1]:
+            history_u.append(u_curr.copy())
+            times_anim.append(t_arr[n+1])
+            
+        # Truncate arrays to clean up remaining unused zero slots
+        t_arr = t_arr[:n+2]
+        z1_arr = z1_arr[:n+2]
+        zd1_arr = zd1_arr[:n+2]
+        forces1 = forces1[:n+2]
+        z2_arr = z2_arr[:n+2]
+        zd2_arr = zd2_arr[:n+2]
+        forces2 = forces2[:n+2]
+        nt = n + 2
+        break
+
     u_prev[:], u_curr[:] = u_curr[:], u_next[:]
 
-    # Store animation frame
     if n % frame_step == 0:
         history_u.append(u_curr.copy())
         times_anim.append(t_arr[n+1])
 
-# Calculate very last force point for consistency in graphs
 forces1[-1] = calculate_force(nt-1, t_arr[-1], z1_arr[-1], zd1_arr[-1], z1_arr, zd1_arr, u_curr, a1)
 forces2[-1] = calculate_force(nt-1, t_arr[-1], z2_arr[-1], zd2_arr[-1], z2_arr, zd2_arr, u_curr, a2)
 print("Simulation complete.")
 
 # --- Static Plots ---
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+# fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+fig, (ax1) = plt.subplots(1, figsize=(12, 5))
 
-# Plot the particle's dynamic trajectory comparison
-ax1.plot(z1_arr, t_arr, color='green', lw=2, label='Particle 1')
-ax1.plot(z2_arr, t_arr, color='orange', linestyle=':', linewidth=2, label='Particle 2')
+ax1.plot(z1_arr, t_arr, color='red', lw=2, label='Particle 1 (Greater Positive Charge)')
+ax1.plot(z2_arr, t_arr, color='red', linestyle=':', linewidth=2, label='Particle 2 (Positive Charge)')
 ax1.set_xlabel('Position $x^1$')
 ax1.set_ylabel('Time ($x^0$)')
-ax1.set_title('Trajectories')
+ax1.set_title('Different Magnitude Charge Trajectories')
 ax1.legend()
 ax1.grid(True, linestyle='--', alpha=0.7)
 
-# Plot Required/Calculated Force
-ax2.plot(np.abs(z1_arr-z2_arr), forces1, color='green', lw=2, label='Distance v.s Force')
-#ax2.plot(t_arr, forces2, color='orange', lw=2, label='Force on P2')
-ax2.set_xlabel('Distance')
-ax2.set_ylabel('Force $f(x^0, z, \\dot{z})$')
-ax2.set_title('Calculated Force on Particles')
-# ax2.set_yscale('log')
-ax2.legend()
-ax2.grid(True, linestyle='--', alpha=0.7)
+# ax2.plot(np.abs(z1_arr-z2_arr), forces1, color='green', lw=2, label='Distance v.s Force')
+# ax2.set_xlabel('Distance')
+# ax2.set_ylabel('Force $f(x^0, z, \\dot{z})$')
+# ax2.set_title('Calculated Force on Particles')
+# ax2.legend()
+# ax2.grid(True, linestyle='--', alpha=0.7)
 
 plt.tight_layout()
+plt.savefig('2particle_trajectory_converge_differentMag.png', dpi=300)
 plt.show()
 
 # --- Animation Block ---
 fig_ani, ax_ani = plt.subplots(figsize=(10, 6))
 ax_ani.set_xlim(-10, 10)
-ax_ani.set_ylim(-10, 10) 
+ax_ani.set_ylim(-2.5, 2.5)   
 ax_ani.set_xlabel('$x^1$')
 ax_ani.set_ylabel('$u(x^0, x^1)$')
 ax_ani.set_title('1D Klein-Gordon Interacting Charges')
@@ -222,5 +217,15 @@ def animate(i):
     return line, marker1, marker2, time_text
 
 ani = FuncAnimation(fig_ani, animate, frames=len(history_u), init_func=init, blit=True, interval=60)
+
+# --- NEW: Function & Call to Save GIF ---
+def save_simulation_gif(animation, filename="interacting_charges.gif", fps=20):
+    print(f"Saving animation to {filename} using Pillow... Please wait.")
+    animation.save(filename, writer='pillow', fps=fps)
+    print("GIF successfully saved!")
+
+# Call the save function before displaying the interactive window
+# save_simulation_gif(ani, filename="charges_diverging.gif", fps=25)
+
 plt.tight_layout()
 plt.show()
